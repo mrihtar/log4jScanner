@@ -23,6 +23,9 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"os"
+	"bufio"
+	"path/filepath"
 
 	"github.com/pterm/pterm"
 	log "github.com/sirupsen/logrus"
@@ -92,7 +95,7 @@ For example: log4jScanner scan --cidr "192.168.0.1/24`,
 			}
 			return
 		}
-		if ports != "top100" && ports != "top10" {
+		if ports != "top100" && ports != "top10" && !strings.HasPrefix(ports, "@") {
 			// check if ports is a single number
 			if _, err = strconv.Atoi(ports); err == nil {
 			} else {
@@ -232,6 +235,17 @@ func ScanCIDR(ctx context.Context, cidr string, portsFlag string, serverUrl stri
 		ports = top100WebPorts
 	} else if portsFlag == "top10" {
 		ports = top10WebPorts
+	} else if strings.HasPrefix(portsFlag, "@") {
+		ports, err = ReadPorts(portsFlag[1:])
+		if err != nil {
+			pterm.Error.Println(err)
+			log.Fatal(err)
+		}
+		if len(ports) == 0 {
+			noPorts := "No ports defined in file " + portsFlag[1:]
+			pterm.Error.Println(noPorts)
+			log.Fatal(noPorts)
+		}
 	} else if p, err := strconv.Atoi(portsFlag); err == nil { // a single port
 		ports = append(ports, p)
 	} else { // range of ports
@@ -250,6 +264,7 @@ func ScanCIDR(ctx context.Context, cidr string, portsFlag string, serverUrl stri
 			}
 		}
 	}
+	pterm.Info.Printf("Scanning %d ports\n", len(ports))
 
 	resChan := make(chan string, 10000)
 
@@ -281,6 +296,32 @@ func ScanCIDR(ctx context.Context, cidr string, portsFlag string, serverUrl stri
 		LDAPServer.Stop()
 	}
 	PrintResults(resChan)
+}
+
+func ReadPorts(portsFile string) ([]int, error) {
+	var ports []int
+
+	file, err := os.Open(filepath.Clean(portsFile))
+	if err != nil {
+		return ports, err
+	}
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		port, err1 := strconv.Atoi(scanner.Text())
+		if err1 != nil {
+			log.Warn(err1)
+		} else {
+			ports = append(ports, port)
+		}
+	}
+	err = scanner.Err()
+
+	if err1 := file.Close(); err1 != nil {
+		log.Warn(err1)
+	}
+
+	return ports, err
 }
 
 func PrintResults(resChan chan string) {
